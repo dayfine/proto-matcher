@@ -76,11 +76,11 @@ class MessageDifferencer():
     def __init__(self,
                  opts: ProtoComparisonOptions,
                  desc: descriptor.Descriptor,
-                 explain: bool = False):
+                 should_explain: bool = False):
         self._opts = opts
         # should expand ignored field paths using desc...
         self._desc = desc
-        self._explain = explain
+        self._should_explain = should_explain
 
     def compare(self, a: message.Message,
                 b: message.Message) -> ProtoComparisonResult:
@@ -94,40 +94,46 @@ class MessageDifferencer():
     def _compare_field(self, other: message.Message,
                        field_desc: _FieldDescriptor,
                        field_value) -> ProtoComparisonResult:
-        field_name = field_desc.name
-        if not b.HasField(field_name):
-            return ProtoComparisonResult(
-                is_equal=False,
-                explanation=f'|{field_name}| expected but not set',
-            )
-
-        other_value = getattr(b, field_name)
         if field_desc.label == _FieldDescriptor.LABEL_REPEATED:
-            return self._compare_repeated_field(field_value[:], other_value[:])
-        return self._compare_singular_field(field_value, other_value,
-                                            field_desc)
+            other_value = getattr(other, field_desc.name)
+            is_message = field_desc.cpp_type == _FieldDescriptor.CPPTYPE_MESSAGE
+            return self._compare_repeated_field(field_value[:], other_value[:],
+                                                is_message)
+        return self._compare_singular_field(other, field_desc, field_value)
 
-    def _compare_repeated_field(a: List, b: List) -> ProtoComparisonResult:
+    def _compare_repeated_field(self, values: List, other_values: List,
+                                is_message) -> ProtoComparisonResult:
         if self._opts.repeated_field_comp == RepeatedFieldComparison.AS_SET:
             other_values.sort()
             values.sort()
         return _combine_results([
-            self._compare_value(a, b)
+            self._compare_value(a, b, is_message)
             for a, b in itertools.zip_longest(values, other_values)
         ])
 
-    def _compare_singular_field(
-            self, a, b, field_desc: _FieldDescriptor) -> ProtoComparisonResult:
-        if field_desc.cpp_type == _FieldDescriptor.CPPTYPE_MESSAGE:
-            return self.compare(a, b)
+    def _compare_singular_field(self, other: message.Message,
+                                field_desc: _FieldDescriptor,
+                                field_value) -> ProtoComparisonResult:
+        try:
+            other_value = getattr(other, field_desc.name)
+        except AttributeError:
+            return ProtoComparisonResult(
+                is_equal=False,
+                explanation=f'|{field_desc.full_name}| expected but not set',
+            )
 
+        is_message = field_desc.cpp_type == _FieldDescriptor.CPPTYPE_MESSAGE
+        return self._compare_value(field_value,
+                                   other_value,
+                                   is_message=is_message)
+
+    def _compare_value(self, a, b, is_message: bool = False):
+        if is_message:
+            return self.compare(a, b)
         return ProtoComparisonResult(
             is_equal=a == b,
             explanation='',
         )
-
-    def _compare_value(self):
-        pass
 
     def _compare_float(self):
         pass
