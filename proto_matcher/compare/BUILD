@@ -19,5 +19,6 @@ py_test(
     deps = [
         ":compare",
         "//proto_matcher/testdata:test_py_pb2",
+        requirement("protobuf"),
     ],
 )
