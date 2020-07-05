@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package proto_matcher;
+
+
+message Foo {
+    repeated Bar bars = 1;
+    Baz baz = 2;
+}
+
+message Bar {
+    oneof id {
+      int32 short_id = 1;
+      int64 long_id = 2;
+    }
+    string name = 3;
+    string description = 4;
+    uint32 size = 5;
+    float progress = 6;
+    bool checked = 7;
+    repeated string notes = 8;
+}
+
+message Baz {
+  enum Status {
+    STATUS_UNSPECIFITED = 0;
+    OK = 1;
+    ERROR = 2;
+  }
+  Status status = 1;
+}
