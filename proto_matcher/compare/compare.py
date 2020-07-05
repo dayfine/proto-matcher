@@ -1,7 +1,7 @@
 import dataclasses
 import enum
 import itertools
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from google.protobuf import descriptor
 from google.protobuf import message
@@ -40,8 +40,8 @@ class ProtoComparisonOptions:
 
 @dataclasses.dataclass
 class ProtoComparisonResult:
-    is_equal: bool
-    explanation: str
+    is_equal: bool = True
+    explanation: str = ''
 
 
 def proto_compare(actual: message.Message,
@@ -73,67 +73,57 @@ def proto_comparable(actual: message.Message,
 
 class MessageDifferencer():
 
-    def __init__(self,
-                 opts: ProtoComparisonOptions,
-                 desc: descriptor.Descriptor,
-                 should_explain: bool = False):
+    def __init__(self, opts: ProtoComparisonOptions,
+                 desc: descriptor.Descriptor):
         self._opts = opts
         # should expand ignored field paths using desc...
         self._desc = desc
-        self._should_explain = should_explain
 
-    def compare(self, a: message.Message,
-                b: message.Message) -> ProtoComparisonResult:
-        # TODO: Full vs. Partial
-        # Right now this is partial?
+    def compare(self, expected: message.Message,
+                actual: message.Message) -> ProtoComparisonResult:
         return _combine_results([
-            self._compare_field(b, field_desc, field_value)
-            for field_desc, field_value in a.ListFields()
+            self._compare_field(expected, actual, field_desc)
+            for field_desc in actual.DESCRIPTOR.fields
         ])
 
-    def _compare_field(self, other: message.Message,
-                       field_desc: _FieldDescriptor,
-                       field_value) -> ProtoComparisonResult:
+    def _compare_field(self, expected: message.Message, actual: message.Message,
+                       field_desc: _FieldDescriptor) -> ProtoComparisonResult:
+        # Repeated field
         if field_desc.label == _FieldDescriptor.LABEL_REPEATED:
-            other_value = getattr(other, field_desc.name)
-            is_message = field_desc.cpp_type == _FieldDescriptor.CPPTYPE_MESSAGE
-            return self._compare_repeated_field(field_value[:], other_value[:],
-                                                is_message)
-        return self._compare_singular_field(other, field_desc, field_value)
+            return self._compare_repeated_field(
+                getattr(expected, field_desc.name)[:],
+                getattr(actual, field_desc.name)[:], field_desc)
 
-    def _compare_repeated_field(self, values: List, other_values: List,
-                                is_message) -> ProtoComparisonResult:
+        # Singular field
+        if (self._opts.scope == ProtoComparisonScope.PARTIAL and
+                not _is_field_set(expected, field_desc)):
+            return _equality_result()
+
+        return self._compare_value(getattr(expected, field_desc.name, None),
+                                   getattr(actual, field_desc.name, None),
+                                   field_desc)
+
+    def _compare_repeated_field(
+            self, expected_values: List[Any], actual_values: List[Any],
+            field_desc: _FieldDescriptor) -> ProtoComparisonResult:
         if self._opts.repeated_field_comp == RepeatedFieldComparison.AS_SET:
-            other_values.sort()
-            values.sort()
+            expected_values.sort()
+            actual_values.sort()
         return _combine_results([
-            self._compare_value(a, b, is_message)
-            for a, b in itertools.zip_longest(values, other_values)
+            self._compare_value(expected, actual, field_desc)
+            for expected, actual in itertools.zip_longest(
+                expected_values, actual_values)
         ])
 
-    def _compare_singular_field(self, other: message.Message,
-                                field_desc: _FieldDescriptor,
-                                field_value) -> ProtoComparisonResult:
-        try:
-            other_value = getattr(other, field_desc.name)
-        except AttributeError:
-            return ProtoComparisonResult(
-                is_equal=False,
-                explanation=f'|{field_desc.full_name}| expected but not set',
-            )
+    def _compare_value(self, expected: Any, actual: Any,
+                       field_desc: _FieldDescriptor):
+        if _is_message(field_desc):
+            if expected and actual:
+                return self.compare(expected, actual)
+            return _inequality_result(expected, actual, field_desc)
 
-        is_message = field_desc.cpp_type == _FieldDescriptor.CPPTYPE_MESSAGE
-        return self._compare_value(field_value,
-                                   other_value,
-                                   is_message=is_message)
-
-    def _compare_value(self, a, b, is_message: bool = False):
-        if is_message:
-            return self.compare(a, b)
-        return ProtoComparisonResult(
-            is_equal=a == b,
-            explanation='',
-        )
+        return _equality_result() if expected == actual else _inequality_result(
+            expected, actual, field_desc)
 
     def _compare_float(self):
         pass
@@ -146,3 +136,38 @@ def _combine_results(
         explanation='\n'.join(
             [res.explanation for res in results if res.explanation]),
     )
+
+
+def _is_message(field_desc: _FieldDescriptor) -> bool:
+    return field_desc.cpp_type == _FieldDescriptor.CPPTYPE_MESSAGE
+
+
+def _is_enum_field(field_desc: _FieldDescriptor) -> bool:
+    return field_desc.enum_type is not None
+
+
+def _is_field_set(msg: message.Message, field_desc: _FieldDescriptor) -> bool:
+    if _is_message(field_desc):
+        return msg.HasField(field_desc.name)
+    if _is_enum_field(field_desc):
+        return getattr(msg, field_desc.name) != 0
+    return hasattr(msg, field_desc.name)
+
+
+def _equality_result() -> ProtoComparisonResult:
+    return ProtoComparisonResult()
+
+
+def _inequality_result(expected: Any, actual: Any,
+                       field_desc: _FieldDescriptor) -> ProtoComparisonResult:
+    if _is_enum_field(field_desc):
+        expected = _get_enum_name(expected, field_desc)
+        actual = _get_enum_name(actual, field_desc)
+    return ProtoComparisonResult(
+        is_equal=False,
+        explanation=f'Expected: {expected}; Actual: {actual}',
+    )
+
+
+def _get_enum_name(enum_value: int, field_desc: _FieldDescriptor) -> str:
+    return field_desc.enum_type.values[enum_value].name
