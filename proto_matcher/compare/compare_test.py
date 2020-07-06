@@ -219,17 +219,53 @@ class ProtoCompareTest(unittest.TestCase):
         pass
 
     def test_ignore_field_single(self):
-        expected = text_format.Parse("baz { status: ERROR }", test_pb2.Foo())
-        actual = text_format.Parse("", test_pb2.Foo())
+        expected = text_format.Parse('baz { status: ERROR }', test_pb2.Foo())
+        actual = text_format.Parse('', test_pb2.Foo())
         self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
                                     False)
 
-        opts = compare.ProtoComparisonOptions(ignore_fields=["baz"])
+        opts = compare.ProtoComparisonOptions(ignore_field_paths={('baz',)})
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), True)
+
+    def test_ignore_field_repeated(self):
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        del actual.bars[:]
+        self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
+                                    False)
+
+        opts = compare.ProtoComparisonOptions(ignore_field_paths={('bars',)})
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), True)
+
+    def test_ignore_field_multiple(self):
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        del actual.bars[:]
+        actual.baz.status = test_pb2.Baz.OK
+
+        opts = compare.ProtoComparisonOptions(ignore_field_paths={('bars',)})
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), False)
+        opts = compare.ProtoComparisonOptions(ignore_field_paths={('baz',)})
         self.assertProtoCompareToBe(
             compare.proto_compare(actual, expected, opts=opts), False)
 
-    def test_compare_proto_ignoring_field_paths(self):
-        pass
+        opts = compare.ProtoComparisonOptions(
+            ignore_field_paths={('bars',), ('baz',)})
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), True)
+
+    def test_ignore_field_nested(self):
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual.bars[0].size = 2
+
+        opts = compare.ProtoComparisonOptions(ignore_field_paths={('bars',
+                                                                   'size')})
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), True)
 
     def test_compare_proto_repeated_fields_ignoring_order(self):
         pass

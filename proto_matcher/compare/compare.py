@@ -4,7 +4,7 @@ import enum
 import math
 import itertools
 import sys
-from typing import Any, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Iterable, List, Mapping, Optional, Set, Tuple
 
 from google.protobuf import descriptor
 from google.protobuf import message
@@ -33,8 +33,7 @@ class ProtoFloatComparison(enum.Enum):
 class ProtoComparisonOptions:
     repeated_field_comp: RepeatedFieldComparison = RepeatedFieldComparison.AS_LIST
     scope: ProtoComparisonScope = ProtoComparisonScope.FULL
-    ignore_fields: Optional[List[str]] = None
-    ignore_field_paths: Optional[List[str]] = None
+    ignore_field_paths: Optional[Set[Tuple[str]]] = None
     treating_nan_as_equal: bool = False
     float_comp: ProtoFloatComparison = ProtoFloatComparison.EXACT
     # |float_margin| and |float_fraction| are only used when
@@ -81,27 +80,39 @@ class MessageDifferencer():
     def __init__(self, opts: ProtoComparisonOptions,
                  desc: descriptor.Descriptor):
         self._opts = opts
+        if not self._opts.ignore_field_paths:
+            self._opts.ignore_field_paths = set()
         # should expand ignored field paths using desc...
         self._desc = desc
 
-    def compare(self, expected: message.Message,
-                actual: message.Message) -> ProtoComparisonResult:
+    def compare(
+        self,
+        expected: message.Message,
+        actual: message.Message,
+        field_path: Tuple[str] = ()
+    ) -> ProtoComparisonResult:
         return _combine_results([
-            self._compare_field(expected, actual, field_desc)
+            self._compare_field(expected, actual, field_desc, field_path)
             for field_desc in actual.DESCRIPTOR.fields
         ])
 
     def _compare_field(self, expected: message.Message, actual: message.Message,
-                       field_desc: _FieldDescriptor) -> ProtoComparisonResult:
+                       field_desc: _FieldDescriptor,
+                       field_path: Tuple[str]) -> ProtoComparisonResult:
+        field_path = field_path + (field_desc.name,)
+        if field_path in self._opts.ignore_field_paths:
+            return _equality_result()
+
         # Repeated field
         if field_desc.label == _FieldDescriptor.LABEL_REPEATED:
             expected_values = getattr(expected, field_desc.name)
             actual_values = getattr(actual, field_desc.name)
             # Map field
             if isinstance(expected_values, collections.abc.Mapping):
-                return self._compare_map(expected_values, actual_values)
+                return self._compare_map(expected_values, actual_values,
+                                         field_path)
             return self._compare_repeated_field(expected_values, actual_values,
-                                                field_desc)
+                                                field_desc, field_path)
 
         # Singular field
         if (self._opts.scope == ProtoComparisonScope.PARTIAL and
@@ -110,29 +121,31 @@ class MessageDifferencer():
 
         return self._compare_value(getattr(expected, field_desc.name, None),
                                    getattr(actual, field_desc.name, None),
-                                   field_desc)
+                                   field_desc, field_path)
 
     def _compare_repeated_field(
             self, expected_values: Iterable[Any], actual_values: Iterable[Any],
-            field_desc: _FieldDescriptor) -> ProtoComparisonResult:
+            field_desc: _FieldDescriptor,
+            field_path: Tuple[str]) -> ProtoComparisonResult:
         if self._opts.repeated_field_comp == RepeatedFieldComparison.AS_SET:
             expected_values.sort()
             actual_values.sort()
         return _combine_results([
-            self._compare_value(expected, actual, field_desc)
+            self._compare_value(expected, actual, field_desc, field_path)
             for expected, actual in itertools.zip_longest(
                 expected_values, actual_values)
         ])
 
     def _compare_map(self, expected_map: Mapping[Any, Any],
-                     actual_map: Mapping[Any, Any]) -> ProtoComparisonResult:
+                     actual_map: Mapping[Any, Any],
+                     field_path: Tuple[str]) -> ProtoComparisonResult:
         desc = expected_map.GetEntryClass().DESCRIPTOR
         key_desc = desc.fields_by_name['key']
         value_desc = desc.fields_by_name['value']
 
         return _combine_results([
             self._compare_key_value_pair(expected_kv, actual_kv, key_desc,
-                                         value_desc)
+                                         value_desc, field_path)
             for expected_kv, actual_kv in itertools.zip_longest(
                 sorted(expected_map.items()), sorted(actual_map.items()))
         ])
@@ -140,7 +153,8 @@ class MessageDifferencer():
     def _compare_key_value_pair(
             self, expected_kv: Optional[Tuple[Any, Any]],
             actual_kv: Optional[Tuple[Any, Any]], key_desc: _FieldDescriptor,
-            value_desc: _FieldDescriptor) -> ProtoComparisonResult:
+            value_desc: _FieldDescriptor,
+            field_path: Tuple[str]) -> ProtoComparisonResult:
         if not expected_kv or not actual_kv:
             return _inequality_result(
                 _readable(expected_kv, value_desc, key_desc),
@@ -148,15 +162,16 @@ class MessageDifferencer():
         expected_key, expected_value = expected_kv
         actual_key, actual_value = actual_kv
         return _combine_results([
-            self._compare_value(expected_key, actual_key, key_desc),
-            self._compare_value(expected_value, actual_value, value_desc)
+            self._compare_value(expected_key, actual_key, key_desc, field_path),
+            self._compare_value(expected_value, actual_value, value_desc,
+                                field_path)
         ])
 
     def _compare_value(self, expected: Any, actual: Any,
-                       field_desc: _FieldDescriptor):
+                       field_desc: _FieldDescriptor, field_path: Tuple[str]):
         if _is_message(field_desc):
             if expected and actual:
-                return self.compare(expected, actual)
+                return self.compare(expected, actual, field_path)
             return _inequality_result(expected, actual, field_desc)
 
         if field_desc.cpp_type == _FieldDescriptor.CPPTYPE_DOUBLE:
