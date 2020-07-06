@@ -1,7 +1,8 @@
+import collections
 import dataclasses
 import enum
 import itertools
-from typing import Any, List, Optional
+from typing import Any, Iterable, List, Mapping, Optional, Tuple
 
 from google.protobuf import descriptor
 from google.protobuf import message
@@ -90,9 +91,13 @@ class MessageDifferencer():
                        field_desc: _FieldDescriptor) -> ProtoComparisonResult:
         # Repeated field
         if field_desc.label == _FieldDescriptor.LABEL_REPEATED:
-            return self._compare_repeated_field(
-                getattr(expected, field_desc.name)[:],
-                getattr(actual, field_desc.name)[:], field_desc)
+            expected_values = getattr(expected, field_desc.name)
+            actual_values = getattr(actual, field_desc.name)
+            # Map field
+            if isinstance(expected_values, collections.abc.Mapping):
+                return self._compare_map(expected_values, actual_values)
+            return self._compare_repeated_field(expected_values, actual_values,
+                                                field_desc)
 
         # Singular field
         if (self._opts.scope == ProtoComparisonScope.PARTIAL and
@@ -104,7 +109,7 @@ class MessageDifferencer():
                                    field_desc)
 
     def _compare_repeated_field(
-            self, expected_values: List[Any], actual_values: List[Any],
+            self, expected_values: Iterable[Any], actual_values: Iterable[Any],
             field_desc: _FieldDescriptor) -> ProtoComparisonResult:
         if self._opts.repeated_field_comp == RepeatedFieldComparison.AS_SET:
             expected_values.sort()
@@ -113,6 +118,33 @@ class MessageDifferencer():
             self._compare_value(expected, actual, field_desc)
             for expected, actual in itertools.zip_longest(
                 expected_values, actual_values)
+        ])
+
+    def _compare_map(self, expected_map: Mapping[Any, Any],
+                     actual_map: Mapping[Any, Any]) -> ProtoComparisonResult:
+        desc = expected_map.GetEntryClass().DESCRIPTOR
+        key_desc = desc.fields_by_name['key']
+        value_desc = desc.fields_by_name['value']
+
+        return _combine_results([
+            self._compare_key_value_pair(expected_kv, actual_kv, key_desc,
+                                         value_desc)
+            for expected_kv, actual_kv in itertools.zip_longest(
+                sorted(expected_map.items()), sorted(actual_map.items()))
+        ])
+
+    def _compare_key_value_pair(
+            self, expected_kv: Optional[Tuple[Any, Any]],
+            actual_kv: Optional[Tuple[Any, Any]], key_desc: _FieldDescriptor,
+            value_desc: _FieldDescriptor) -> ProtoComparisonResult:
+        if not expected_kv or not actual_kv:
+            # TODO: the key_desc is chosen arbitrarily
+            return _inequality_result(expected_kv, actual_kv, key_desc)
+        expected_key, expected_value = expected_kv
+        actual_key, actual_value = actual_kv
+        return _combine_results([
+            self._compare_value(expected_key, actual_key, key_desc),
+            self._compare_value(expected_value, actual_value, value_desc)
         ])
 
     def _compare_value(self, expected: Any, actual: Any,

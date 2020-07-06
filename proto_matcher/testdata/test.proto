@@ -6,6 +6,7 @@ package proto_matcher;
 message Foo {
     repeated Bar bars = 1;
     Baz baz = 2;
+    map<int32, string> mapping = 3;
 }
 
 message Bar {

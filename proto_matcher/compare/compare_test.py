@@ -22,6 +22,14 @@ bars {
 baz {
     status: ERROR
 }
+mapping {
+    key: 5
+    value: "haha"
+}
+mapping {
+    key: 10
+    value: "hello world!"
+}
 """
 
 
@@ -69,9 +77,12 @@ class ProtoCompareTest(unittest.TestCase):
         self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
                                     False)
 
-    def test_map_field_equality(self):
-        # TODO
-        pass
+    def test_map_field_inequality(self):
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        expected.mapping[15] = 'luck'
+        self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
+                                    False)
 
     def test_basic_partial_equality(self):
         expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
@@ -105,6 +116,16 @@ class ProtoCompareTest(unittest.TestCase):
         expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
         actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
         actual.baz.Clear()
+
+        opts = compare.ProtoComparisonOptions(
+            scope=compare.ProtoComparisonScope.PARTIAL)
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), False)
+
+    def test_repeated_field_partial_inequality(self):
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        expected.bars.add().progress = 0.1
 
         opts = compare.ProtoComparisonOptions(
             scope=compare.ProtoComparisonScope.PARTIAL)
