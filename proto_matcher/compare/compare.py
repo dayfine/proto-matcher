@@ -1,13 +1,17 @@
 import collections
 import dataclasses
 import enum
+import math
 import itertools
+import sys
 from typing import Any, Iterable, List, Mapping, Optional, Tuple
 
 from google.protobuf import descriptor
 from google.protobuf import message
 
 _FieldDescriptor = descriptor.FieldDescriptor
+_FLT_EPSILON = 1.19209e-07
+_DBL_EPSILON = sys.float_info.epsilon
 
 
 class RepeatedFieldComparison(enum.Enum):
@@ -34,7 +38,7 @@ class ProtoComparisonOptions:
     treating_nan_as_equal: bool = False
     float_comp: ProtoFloatComparison = ProtoFloatComparison.EXACT
     # |float_margin| and |float_fraction| are only used when
-    # float_comp = APPROXIMATE. Only one of them should be set.
+    # float_comp = APPROXIMATE.
     float_margin: Optional[float] = None
     float_fraction: Optional[float] = None
 
@@ -138,8 +142,9 @@ class MessageDifferencer():
             actual_kv: Optional[Tuple[Any, Any]], key_desc: _FieldDescriptor,
             value_desc: _FieldDescriptor) -> ProtoComparisonResult:
         if not expected_kv or not actual_kv:
-            # TODO: the key_desc is chosen arbitrarily
-            return _inequality_result(expected_kv, actual_kv, key_desc)
+            return _inequality_result(
+                _readable(expected_kv, value_desc, key_desc),
+                _readable(actual_kv, value_desc, key_desc))
         expected_key, expected_value = expected_kv
         actual_key, actual_value = actual_kv
         return _combine_results([
@@ -154,11 +159,32 @@ class MessageDifferencer():
                 return self.compare(expected, actual)
             return _inequality_result(expected, actual, field_desc)
 
+        if field_desc.cpp_type == _FieldDescriptor.CPPTYPE_DOUBLE:
+            return self._compare_float(expected, actual, _DBL_EPSILON)
+        if field_desc.cpp_type == _FieldDescriptor.CPPTYPE_FLOAT:
+            return self._compare_float(expected, actual, _FLT_EPSILON)
+        # Simple primitive value
         return _equality_result() if expected == actual else _inequality_result(
             expected, actual, field_desc)
 
-    def _compare_float(self):
-        pass
+    def _compare_float(self, expected: float, actual: float,
+                       epsilon: float) -> ProtoComparisonResult:
+        if expected == actual:
+            return _equality_result()
+        if (self._opts.treating_nan_as_equal and math.isnan(expected) and
+                math.isnan(actual)):
+            return _equality_result()
+
+        if self._opts.float_comp == ProtoFloatComparison.EXACT:
+            return _inequality_result(expected, actual)
+
+        # float_comp == APPROXIMATE
+        fraction = self._opts.float_fraction or 0.0
+        margin = self._opts.float_margin or (32 * epsilon)
+        is_equal = _within_fraction_or_margin(expected, actual, fraction,
+                                              margin)
+        return _equality_result() if is_equal \
+            else _inequality_result(expected, actual)
 
 
 def _combine_results(
@@ -190,16 +216,40 @@ def _equality_result() -> ProtoComparisonResult:
     return ProtoComparisonResult()
 
 
-def _inequality_result(expected: Any, actual: Any,
-                       field_desc: _FieldDescriptor) -> ProtoComparisonResult:
-    if _is_enum_field(field_desc):
-        expected = _get_enum_name(expected, field_desc)
-        actual = _get_enum_name(actual, field_desc)
+def _inequality_result(
+        expected: Any,
+        actual: Any,
+        field_desc: Optional[_FieldDescriptor] = None) -> ProtoComparisonResult:
+    if field_desc:
+        expected = _readable(expected, field_desc)
+        actual = _readable(actual, field_desc)
     return ProtoComparisonResult(
         is_equal=False,
         explanation=f'Expected: {expected}; Actual: {actual}',
     )
 
 
+def _readable(value: Any,
+              value_desc: _FieldDescriptor,
+              key_desc: Optional[_FieldDescriptor] = None) -> str:
+    if key_desc and value:
+        key, value = value
+        return f'key: {_readable(key, key_desc)}' \
+               f'value: {_readable(value, value_desc)}'
+    if _is_enum_field(value_desc):
+        return _get_enum_name(value, value_desc)
+    return str(value)
+
+
 def _get_enum_name(enum_value: int, field_desc: _FieldDescriptor) -> str:
     return field_desc.enum_type.values[enum_value].name
+
+
+def _within_fraction_or_margin(x: float, y: float, fraction: float,
+                               margin: float) -> bool:
+    if not (fraction >= 0.0 and fraction < 1.0 and margin >= .0):
+        raise ValueError(f'Invalid fraction {fraction} or margin {margin}')
+    if math.isinf(x) or math.isinf(y):
+        return False
+    relative_margin = fraction * max(abs(x), abs(y))
+    return abs(x - y) <= max(margin, relative_margin)

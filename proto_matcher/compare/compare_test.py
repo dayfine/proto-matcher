@@ -132,8 +132,101 @@ class ProtoCompareTest(unittest.TestCase):
         self.assertProtoCompareToBe(
             compare.proto_compare(actual, expected, opts=opts), False)
 
+    def test_aproximate_equality(self):
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
+                                    True)
+
+    def test_aproximate_modified_equality(self):
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        expected.bars[0].progress = 2.300005
+        actual.bars[0].progress = 2.300006
+        self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
+                                    False)
+
+        opts = compare.ProtoComparisonOptions(
+            float_comp=compare.ProtoFloatComparison.APPROXIMATE)
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), True)
+
+    def test_aproximate_modified_equality_double(self):
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        expected.bars[0].precision = 2.3 + 1.1e-15
+        actual.bars[0].precision = 2.3 + 1.2e-15
+        self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
+                                    False)
+
+        opts = compare.ProtoComparisonOptions(
+            float_comp=compare.ProtoFloatComparison.APPROXIMATE)
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), True)
+
+    def test_within_fraction_or_margin_float(self):
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        expected.bars[0].progress = 100.0
+        actual.bars[0].progress = 109.9
+        self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
+                                    False)
+
+        # fraction and margin do not matter when |float_comp| is EXACT.
+        opts = compare.ProtoComparisonOptions(float_fraction=0.0,
+                                              float_margin=10.0)
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), False)
+
+        opts = compare.ProtoComparisonOptions(
+            float_fraction=0.0,
+            float_margin=10.0,
+            float_comp=compare.ProtoFloatComparison.APPROXIMATE)
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), True)
+
+        opts = compare.ProtoComparisonOptions(
+            float_fraction=0.2,
+            float_margin=0.0,
+            float_comp=compare.ProtoFloatComparison.APPROXIMATE)
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), True)
+
+        opts = compare.ProtoComparisonOptions(
+            float_fraction=0.01,
+            float_margin=0.0,
+            float_comp=compare.ProtoFloatComparison.APPROXIMATE)
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), False)
+
+        opts = compare.ProtoComparisonOptions(
+            float_fraction=0.10,
+            float_margin=10.0,
+            float_comp=compare.ProtoFloatComparison.APPROXIMATE)
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), True)
+
+    def test_oneof_inequality(self):
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        expected.bars[0].long_id = expected.bars[0].short_id
+        self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
+                                    False)
+
     def test_compare_proto_ignoring_fields(self):
+        # a: 1,      2,    3, 9, 4, 5, 7,   2
+        # b:   9, 0, 2, 7, 3,    4, 5,   6, 2
         pass
+
+    def test_ignore_field_single(self):
+        expected = text_format.Parse("baz { status: ERROR }", test_pb2.Foo())
+        actual = text_format.Parse("", test_pb2.Foo())
+        self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
+                                    False)
+
+        opts = compare.ProtoComparisonOptions(ignore_fields=["baz"])
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), False)
 
     def test_compare_proto_ignoring_field_paths(self):
         pass
