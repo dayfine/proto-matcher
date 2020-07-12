@@ -1,12 +1,18 @@
+import collections
+import copy
 import dataclasses
 import enum
+import math
 import itertools
-from typing import Any, List, Optional
+import sys
+from typing import Any, Generic, Iterable, List, Mapping, Optional, Set, TypeVar, Tuple
 
 from google.protobuf import descriptor
 from google.protobuf import message
 
 _FieldDescriptor = descriptor.FieldDescriptor
+_FLT_EPSILON = 1.19209e-07
+_DBL_EPSILON = sys.float_info.epsilon
 
 
 class RepeatedFieldComparison(enum.Enum):
@@ -28,12 +34,11 @@ class ProtoFloatComparison(enum.Enum):
 class ProtoComparisonOptions:
     repeated_field_comp: RepeatedFieldComparison = RepeatedFieldComparison.AS_LIST
     scope: ProtoComparisonScope = ProtoComparisonScope.FULL
-    ignore_fields: Optional[List[str]] = None
-    ignore_field_paths: Optional[List[str]] = None
+    ignore_field_paths: Optional[Set[Tuple[str]]] = None
     treating_nan_as_equal: bool = False
     float_comp: ProtoFloatComparison = ProtoFloatComparison.EXACT
     # |float_margin| and |float_fraction| are only used when
-    # float_comp = APPROXIMATE. Only one of them should be set.
+    # float_comp = APPROXIMATE.
     float_margin: Optional[float] = None
     float_fraction: Optional[float] = None
 
@@ -71,62 +76,148 @@ def proto_comparable(actual: message.Message,
     return actual.DESCRIPTOR == expected.DESCRIPTOR
 
 
+T = TypeVar("T")
+
+
+@dataclasses.dataclass
+class ProtoFieldComparisonArgs(Generic[T]):
+    expected: T
+    actual: T
+    field_desc: _FieldDescriptor
+    field_path: Tuple[str]
+
+
 class MessageDifferencer():
 
     def __init__(self, opts: ProtoComparisonOptions,
                  desc: descriptor.Descriptor):
         self._opts = opts
+        if not self._opts.ignore_field_paths:
+            self._opts.ignore_field_paths = set()
         # should expand ignored field paths using desc...
         self._desc = desc
 
-    def compare(self, expected: message.Message,
-                actual: message.Message) -> ProtoComparisonResult:
+    def compare(
+        self,
+        expected: message.Message,
+        actual: message.Message,
+        field_path: Tuple[str] = ()
+    ) -> ProtoComparisonResult:
         return _combine_results([
-            self._compare_field(expected, actual, field_desc)
-            for field_desc in actual.DESCRIPTOR.fields
+            self._compare(
+                ProtoFieldComparisonArgs(expected=expected,
+                                         actual=actual,
+                                         field_desc=None,
+                                         field_path=field_path))
         ])
 
-    def _compare_field(self, expected: message.Message, actual: message.Message,
-                       field_desc: _FieldDescriptor) -> ProtoComparisonResult:
+    def _compare(
+        self, args: ProtoFieldComparisonArgs[message.Message]
+    ) -> ProtoComparisonResult:
+        return _combine_results([
+            self._compare_field(
+                ProtoFieldComparisonArgs(expected=args.expected,
+                                         actual=args.actual,
+                                         field_desc=field_desc,
+                                         field_path=args.field_path))
+            for field_desc in args.actual.DESCRIPTOR.fields
+        ])
+
+    def _compare_field(
+            self, args: ProtoFieldComparisonArgs[Any]) -> ProtoComparisonResult:
+        cmp_args = copy.copy(args)
+        field_name = cmp_args.field_desc.name
+        cmp_args.field_path = cmp_args.field_path + (field_name,)
+        if cmp_args.field_path in self._opts.ignore_field_paths:
+            return _equality_result()
+
+        cmp_args.expected = getattr(cmp_args.expected, field_name, None)
+        cmp_args.actual = getattr(cmp_args.actual, field_name, None)
+
         # Repeated field
-        if field_desc.label == _FieldDescriptor.LABEL_REPEATED:
-            return self._compare_repeated_field(
-                getattr(expected, field_desc.name)[:],
-                getattr(actual, field_desc.name)[:], field_desc)
+        if cmp_args.field_desc.label == _FieldDescriptor.LABEL_REPEATED:
+            # Map field
+            if isinstance(cmp_args.expected, collections.abc.Mapping):
+                return self._compare_map(cmp_args)
+            return self._compare_repeated_field(cmp_args)
 
         # Singular field
         if (self._opts.scope == ProtoComparisonScope.PARTIAL and
-                not _is_field_set(expected, field_desc)):
+                not _is_field_set(cmp_args.expected, cmp_args.field_desc)):
             return _equality_result()
 
-        return self._compare_value(getattr(expected, field_desc.name, None),
-                                   getattr(actual, field_desc.name, None),
-                                   field_desc)
+        return self._compare_value(cmp_args)
 
     def _compare_repeated_field(
-            self, expected_values: List[Any], actual_values: List[Any],
-            field_desc: _FieldDescriptor) -> ProtoComparisonResult:
+            self, cmp_args: ProtoFieldComparisonArgs[Iterable]
+    ) -> ProtoComparisonResult:
         if self._opts.repeated_field_comp == RepeatedFieldComparison.AS_SET:
-            expected_values.sort()
-            actual_values.sort()
+            cmp_args.expected.sort()
+            cmp_args.actual.sort()
         return _combine_results([
-            self._compare_value(expected, actual, field_desc)
+            self._compare_value(
+                ProtoFieldComparisonArgs(expected=expected,
+                                         actual=actual,
+                                         field_desc=cmp_args.field_desc,
+                                         field_path=cmp_args.field_path))
             for expected, actual in itertools.zip_longest(
-                expected_values, actual_values)
+                cmp_args.expected, cmp_args.actual)
         ])
 
-    def _compare_value(self, expected: Any, actual: Any,
-                       field_desc: _FieldDescriptor):
-        if _is_message(field_desc):
-            if expected and actual:
-                return self.compare(expected, actual)
-            return _inequality_result(expected, actual, field_desc)
+    def _compare_map(
+            self, cmp_args: ProtoFieldComparisonArgs[Mapping]
+    ) -> ProtoComparisonResult:
+        desc = cmp_args.expected.GetEntryClass().DESCRIPTOR
+        key_desc = desc.fields_by_name['key']
+        value_desc = desc.fields_by_name['value']
 
-        return _equality_result() if expected == actual else _inequality_result(
-            expected, actual, field_desc)
+        return _combine_results([
+            _combine_results([
+                self._compare_value(
+                    ProtoFieldComparisonArgs(expected=expected_kv and
+                                             expected_kv[0],
+                                             actual=actual_kv and actual_kv[0],
+                                             field_desc=key_desc,
+                                             field_path=cmp_args.field_path)),
+                self._compare_value(
+                    ProtoFieldComparisonArgs(expected=expected_kv and
+                                             expected_kv[1],
+                                             actual=actual_kv and actual_kv[1],
+                                             field_desc=value_desc,
+                                             field_path=cmp_args.field_path))
+            ]) for expected_kv, actual_kv in itertools.zip_longest(
+                sorted(cmp_args.expected.items()),
+                sorted(cmp_args.actual.items()))
+        ])
 
-    def _compare_float(self):
-        pass
+    def _compare_value(self, cmp_args: ProtoFieldComparisonArgs[Any]):
+        if _is_message(cmp_args.field_desc):
+            if cmp_args.expected and cmp_args.actual:
+                return self._compare(cmp_args)
+            return _inequality_result(cmp_args)
+        if _is_float(cmp_args.field_desc):
+            return self._compare_float(cmp_args)
+        return _equality_result() if cmp_args.expected == cmp_args.actual \
+            else _inequality_result(cmp_args)
+
+    def _compare_float(
+            self, cmp_args: ProtoFieldComparisonArgs) -> ProtoComparisonResult:
+        if cmp_args.expected == cmp_args.actual:
+            return _equality_result()
+        if (self._opts.treating_nan_as_equal and math.isnan(expected) and
+                math.isnan(actual)):
+            return _equality_result()
+
+        if self._opts.float_comp == ProtoFloatComparison.EXACT:
+            return _inequality_result(cmp_args)
+
+        # float_comp == APPROXIMATE
+        fraction = self._opts.float_fraction or 0.0
+        margin = self._opts.float_margin or _get_float_comparison_epsilon(
+            cmp_args.field_desc)
+        is_equal = _within_fraction_or_margin(cmp_args.expected,
+                                              cmp_args.actual, fraction, margin)
+        return _equality_result() if is_equal else _inequality_result(cmp_args)
 
 
 def _combine_results(
@@ -142,32 +233,76 @@ def _is_message(field_desc: _FieldDescriptor) -> bool:
     return field_desc.cpp_type == _FieldDescriptor.CPPTYPE_MESSAGE
 
 
-def _is_enum_field(field_desc: _FieldDescriptor) -> bool:
+def _is_float(field_desc: _FieldDescriptor) -> bool:
+    return field_desc.cpp_type in (_FieldDescriptor.CPPTYPE_DOUBLE,
+                                   _FieldDescriptor.CPPTYPE_FLOAT)
+
+
+def _is_enum(field_desc: _FieldDescriptor) -> bool:
     return field_desc.enum_type is not None
 
 
-def _is_field_set(msg: message.Message, field_desc: _FieldDescriptor) -> bool:
-    if _is_message(field_desc):
-        return msg.HasField(field_desc.name)
-    if _is_enum_field(field_desc):
-        return getattr(msg, field_desc.name) != 0
-    return hasattr(msg, field_desc.name)
+def _is_field_set(value: Any, field_desc: _FieldDescriptor) -> bool:
+    if _is_enum(field_desc):
+        return value != 0
+    return bool(value)
 
 
 def _equality_result() -> ProtoComparisonResult:
     return ProtoComparisonResult()
 
 
-def _inequality_result(expected: Any, actual: Any,
-                       field_desc: _FieldDescriptor) -> ProtoComparisonResult:
-    if _is_enum_field(field_desc):
-        expected = _get_enum_name(expected, field_desc)
-        actual = _get_enum_name(actual, field_desc)
+def _inequality_result(
+        cmp_args: ProtoFieldComparisonArgs) -> ProtoComparisonResult:
     return ProtoComparisonResult(
         is_equal=False,
-        explanation=f'Expected: {expected}; Actual: {actual}',
+        explanation=_explain_diff(cmp_args),
     )
+
+
+def _explain_diff(cmp_args: ProtoFieldComparisonArgs):
+    expected = _readable(cmp_args.expected, cmp_args.field_desc)
+    actual = _readable(cmp_args.actual, cmp_args.field_desc)
+    # TODO: add index here.
+    field_path_with_index = '.'.join(cmp_args.field_path)
+    if expected and not actual:
+        return f'deleted: {field_path_with_index}: {expected}\n'
+    if actual and not expected:
+        return f'added: {field_path_with_index}: {actual}\n'
+    return f'modified: {field_path_with_index}: {expected} -> {actual}\n'
+
+
+def _readable(value: Any,
+              value_desc: _FieldDescriptor,
+              key_desc: Optional[_FieldDescriptor] = None) -> str:
+    if key_desc and value:
+        key, value = value
+        return f'key: {_readable(key, key_desc)}' \
+               f'value: {_readable(value, value_desc)}'
+    if _is_enum(value_desc):
+        return _get_enum_name(value, value_desc)
+    if type(value) == str:
+        return f'\"{value}\"'
+    return str(value)
 
 
 def _get_enum_name(enum_value: int, field_desc: _FieldDescriptor) -> str:
     return field_desc.enum_type.values[enum_value].name
+
+
+def _get_float_comparison_epsilon(field_desc: _FieldDescriptor):
+    if field_desc.cpp_type == _FieldDescriptor.CPPTYPE_DOUBLE:
+        return _DBL_EPSILON * 32
+    if field_desc.cpp_type == _FieldDescriptor.CPPTYPE_FLOAT:
+        return _FLT_EPSILON * 32
+    raise TypeError('Float comparison called on non-float types')
+
+
+def _within_fraction_or_margin(x: float, y: float, fraction: float,
+                               margin: float) -> bool:
+    if not (fraction >= 0.0 and fraction < 1.0 and margin >= .0):
+        raise ValueError(f'Invalid fraction {fraction} or margin {margin}')
+    if math.isinf(x) or math.isinf(y):
+        return False
+    relative_margin = fraction * max(abs(x), abs(y))
+    return abs(x - y) <= max(margin, relative_margin)
