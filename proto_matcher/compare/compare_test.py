@@ -37,7 +37,7 @@ class ProtoCompareTest(unittest.TestCase):
 
     def assertProtoCompareToBe(self, result: compare.ProtoComparisonResult,
                                to_be: bool):
-        self.assertEqual(result.is_equal, to_be, result.explanation)
+        self.assertEqual(result.is_equal, to_be, result.explanation)\
 
     def test_proto_comparable(self):
         self.assertTrue(compare.proto_comparable(test_pb2.Foo(),
