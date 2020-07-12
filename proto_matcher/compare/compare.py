@@ -3,12 +3,13 @@ import copy
 import dataclasses
 import enum
 import math
-import itertools
 import sys
 from typing import Any, Generic, Iterable, List, Mapping, Optional, Set, TypeVar, Tuple
 
 from google.protobuf import descriptor
 from google.protobuf import message
+
+from proto_matcher.compare import iter_util
 
 _FieldDescriptor = descriptor.FieldDescriptor
 _FLT_EPSILON = 1.19209e-07
@@ -159,9 +160,8 @@ class MessageDifferencer():
                 ProtoFieldComparisonArgs(expected=expected,
                                          actual=actual,
                                          field_desc=cmp_args.field_desc,
-                                         field_path=cmp_args.field_path))
-            for expected, actual in itertools.zip_longest(
-                cmp_args.expected, cmp_args.actual)
+                                         field_path=cmp_args.field_path)) for
+            expected, actual in iter_util.zip_pairs(cmp_args.expected, cmp_args.actual)
         ])
 
     def _compare_map(
@@ -185,9 +185,10 @@ class MessageDifferencer():
                                              actual=actual_kv and actual_kv[1],
                                              field_desc=value_desc,
                                              field_path=cmp_args.field_path))
-            ]) for expected_kv, actual_kv in itertools.zip_longest(
+            ]) for expected_kv, actual_kv in iter_util.zip_pairs(
                 sorted(cmp_args.expected.items()),
-                sorted(cmp_args.actual.items()))
+                sorted(cmp_args.actual.items()),
+                key_fn=lambda kv: kv[0])
         ])
 
     def _compare_value(self, cmp_args: ProtoFieldComparisonArgs[Any]):

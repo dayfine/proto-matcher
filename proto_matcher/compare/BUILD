@@ -8,6 +8,7 @@ py_library(
     srcs = ["compare.py"],
     srcs_version = "PY3",
     deps = [
+        ":iter_util",
         requirement("protobuf"),
     ],
 )
@@ -19,6 +20,15 @@ py_test(
     deps = [
         ":compare",
         "//proto_matcher/testdata:test_py_pb2",
+        requirement("protobuf"),
+    ],
+)
+
+py_library(
+    name = "iter_util",
+    srcs = ["iter_util.py"],
+    srcs_version = "PY3",
+    deps = [
         requirement("protobuf"),
     ],
 )
