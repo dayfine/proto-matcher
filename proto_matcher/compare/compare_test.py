@@ -261,6 +261,8 @@ class ProtoCompareTest(unittest.TestCase):
         expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
         actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
         actual.bars[0].size = 2
+        self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
+                                    False)
 
         opts = compare.ProtoComparisonOptions(ignore_field_paths={('bars',
                                                                    'size')})
@@ -268,13 +270,18 @@ class ProtoCompareTest(unittest.TestCase):
             compare.proto_compare(actual, expected, opts=opts), True)
 
     def test_compare_proto_repeated_fields_ignoring_order(self):
-        pass
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        reversed_bars = actual.bars[::-1]
+        del actual.bars[:]
+        actual.bars.extend(reversed_bars)
+        self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
+                                    False)
 
-    def test_compare_proto_float_fields_by_margin(self):
-        pass
-
-    def test_compare_proto_float_fields_by_fraction(self):
-        pass
+        opts = compare.ProtoComparisonOptions(
+            repeated_field_comp=compare.RepeatedFieldComparison.AS_SET)
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), True)
 
 
 if __name__ == '__main__':

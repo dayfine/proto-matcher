@@ -3,12 +3,13 @@ import copy
 import dataclasses
 import enum
 import math
-import itertools
 import sys
 from typing import Any, Generic, Iterable, List, Mapping, Optional, Set, TypeVar, Tuple
 
 from google.protobuf import descriptor
 from google.protobuf import message
+
+from proto_matcher.compare import iter_util
 
 _FieldDescriptor = descriptor.FieldDescriptor
 _FLT_EPSILON = 1.19209e-07
@@ -151,17 +152,18 @@ class MessageDifferencer():
     def _compare_repeated_field(
             self, cmp_args: ProtoFieldComparisonArgs[Iterable]
     ) -> ProtoComparisonResult:
+        as_set_key = lambda x: str(x)
         if self._opts.repeated_field_comp == RepeatedFieldComparison.AS_SET:
-            cmp_args.expected.sort()
-            cmp_args.actual.sort()
+            cmp_args.expected.sort(key=as_set_key)
+            cmp_args.actual.sort(key=as_set_key)
         return _combine_results([
             self._compare_value(
                 ProtoFieldComparisonArgs(expected=expected,
                                          actual=actual,
                                          field_desc=cmp_args.field_desc,
                                          field_path=cmp_args.field_path))
-            for expected, actual in itertools.zip_longest(
-                cmp_args.expected, cmp_args.actual)
+            for expected, actual in iter_util.zip_pairs(cmp_args.expected,
+                                                        cmp_args.actual)
         ])
 
     def _compare_map(
@@ -185,9 +187,10 @@ class MessageDifferencer():
                                              actual=actual_kv and actual_kv[1],
                                              field_desc=value_desc,
                                              field_path=cmp_args.field_path))
-            ]) for expected_kv, actual_kv in itertools.zip_longest(
-                sorted(cmp_args.expected.items()),
-                sorted(cmp_args.actual.items()))
+            ]) for expected_kv, actual_kv in iter_util.zip_pairs(
+                cmp_args.expected.items(),
+                cmp_args.actual.items(),
+                key=lambda kv: kv[0])
         ])
 
     def _compare_value(self, cmp_args: ProtoFieldComparisonArgs[Any]):
