@@ -160,8 +160,9 @@ class MessageDifferencer():
                 ProtoFieldComparisonArgs(expected=expected,
                                          actual=actual,
                                          field_desc=cmp_args.field_desc,
-                                         field_path=cmp_args.field_path)) for
-            expected, actual in iter_util.zip_pairs(cmp_args.expected, cmp_args.actual)
+                                         field_path=cmp_args.field_path))
+            for expected, actual in iter_util.zip_pairs(cmp_args.expected,
+                                                        cmp_args.actual)
         ])
 
     def _compare_map(

@@ -270,12 +270,6 @@ class ProtoCompareTest(unittest.TestCase):
     def test_compare_proto_repeated_fields_ignoring_order(self):
         pass
 
-    def test_compare_proto_float_fields_by_margin(self):
-        pass
-
-    def test_compare_proto_float_fields_by_fraction(self):
-        pass
-
 
 if __name__ == '__main__':
     unittest.main()

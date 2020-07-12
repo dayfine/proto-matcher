@@ -4,6 +4,15 @@ load("@py_deps//:requirements.bzl", "requirement")
 package(default_visibility = ["//proto_matcher:internal"])
 
 py_library(
+    name = "module",
+    srcs = ["__init__.py"],
+    srcs_version = "PY3",
+    deps = [
+        ":compare",
+    ],
+)
+
+py_library(
     name = "compare",
     srcs = ["compare.py"],
     srcs_version = "PY3",
