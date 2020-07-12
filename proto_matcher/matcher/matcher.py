@@ -74,5 +74,7 @@ def ignoring_field_paths(field_paths: Set[Tuple[str]],
     return matcher
 
 
-class _IgnoringRepeatedFieldOrdering(BaseMatcher):
-    pass
+def ignoring_repeated_field_ordering(matcher: _ProtoMatcher) -> _ProtoMatcher:
+    opts = matcher.mut_options()
+    opts.repeated_field_comp = RepeatedFieldComparison.AS_SET
+    return matcher

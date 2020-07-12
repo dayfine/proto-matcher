@@ -6,6 +6,7 @@ from google.protobuf import text_format
 from proto_matcher.matcher.matcher import equals_proto
 from proto_matcher.matcher.matcher import approximately
 from proto_matcher.matcher.matcher import ignoring_field_paths
+from proto_matcher.matcher.matcher import ignoring_repeated_field_ordering
 from proto_matcher.matcher.matcher import partially
 from proto_matcher.compare import compare
 from proto_matcher.testdata import test_pb2
@@ -189,7 +190,15 @@ class ProtoCompareTest(unittest.TestCase):
             ignoring_field_paths({('bars', 'size')}, equals_proto(expected)))
 
     def test_compare_proto_repeated_fields_ignoring_order(self):
-        pass
+        expected = self._get_test_proto()
+        actual = self._get_test_proto()
+        reversed_bars = actual.bars[::-1]
+        del actual.bars[:]
+        actual.bars.extend(reversed_bars)
+        assert_that(actual, not_(equals_proto(expected)))
+
+        assert_that(actual,
+                    ignoring_repeated_field_ordering(equals_proto(expected)))
 
 
 if __name__ == '__main__':
