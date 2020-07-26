@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="proto_matcher",
-    version="0.0.2",
+    version="0.0.3",
     author="dayfine",
     author_email="",
     description="Test matcher for protobuffer",
@@ -18,5 +18,5 @@ setuptools.setup(
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.7',
 )
