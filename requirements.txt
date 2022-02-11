@@ -4,9 +4,9 @@
 #
 #    pip-compile
 #
-protobuf==3.12.2          # via -r requirements.in
-pyhamcrest==2.0.2         # via -r requirements.in
-six==1.15.0               # via protobuf
-
-# The following packages are considered to be unsafe in a requirements file:
-# setuptools
+protobuf==3.15.0
+    # via -r requirements.in
+pyhamcrest==2.0.2
+    # via -r requirements.in
+six==1.15.0
+    # via protobuf
