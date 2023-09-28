@@ -283,6 +283,58 @@ class ProtoCompareTest(unittest.TestCase):
         self.assertProtoCompareToBe(
             compare.proto_compare(actual, expected, opts=opts), True)
 
+    def test_compare_proto_repeated_fields_ignoring_order__does_not_modify_input(self):
+        expected = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+        actual = text_format.Parse(_TEST_PROTO, test_pb2.Foo())
+
+        opts = compare.ProtoComparisonOptions(
+            repeated_field_comp=compare.RepeatedFieldComparison.AS_SET)
+        compare.proto_compare(actual, expected, opts=opts)
+
+        self.assertEqual(expected, text_format.Parse(_TEST_PROTO, test_pb2.Foo()))
+        self.assertEqual(actual, text_format.Parse(_TEST_PROTO, test_pb2.Foo()))
+
+    def test_ignore_nested_field_with_ignore_repeated_field_order(self):
+        expected = test_pb2.Foo()
+        expected.bars.extend([
+            test_pb2.Bar(
+                short_id=1,
+                name='first bar',
+            ),
+            test_pb2.Bar(
+                short_id=2,
+                name='second bar',
+            ),
+        ])
+        actual = test_pb2.Foo()
+        actual.bars.extend([
+            test_pb2.Bar(
+                long_id=20,
+                name='second bar',
+            ),
+            test_pb2.Bar(
+                long_id=10,
+                name='first bar',
+            ),
+        ])
+
+        self.assertProtoCompareToBe(compare.proto_compare(actual, expected),
+                                    False)
+        opts = compare.ProtoComparisonOptions(
+            repeated_field_comp=compare.RepeatedFieldComparison.AS_SET)
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), False)
+        opts = compare.ProtoComparisonOptions(
+            ignore_field_paths={('bars', 'short_id'), ('bars', 'long_id')})
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), False)
+
+        # opts = compare.ProtoComparisonOptions(
+        #     repeated_field_comp=compare.RepeatedFieldComparison.AS_SET,
+        #     ignore_field_paths={('bars', 'short_id'), ('bars', 'long_id')})
+        # self.assertProtoCompareToBe(
+        #     compare.proto_compare(actual, expected, opts=opts), True)
+
 
 if __name__ == '__main__':
     unittest.main()
