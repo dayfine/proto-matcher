@@ -200,6 +200,48 @@ class ProtoCompareTest(unittest.TestCase):
         assert_that(actual,
                     ignoring_repeated_field_ordering(equals_proto(expected)))
 
+    def test_ignore_nested_field_with_ignore_repeated_field_order(self):
+        expected = test_pb2.Foo()
+        expected.bars.extend([
+            test_pb2.Bar(
+                short_id=1,
+                name='first bar',
+            ),
+            test_pb2.Bar(
+                short_id=2,
+                name='second bar',
+            ),
+        ])
+        actual = test_pb2.Foo()
+        actual.bars.extend([
+            test_pb2.Bar(
+                long_id=20,
+                name='second bar',
+            ),
+            test_pb2.Bar(
+                long_id=10,
+                name='first bar',
+            ),
+        ])
+
+        assert_that(actual, not_(equals_proto(expected)))
+        assert_that(
+            actual,
+            not_(ignoring_repeated_field_ordering(equals_proto(expected))))
+        ignored_fields = {('bars', 'short_id'), ('bars', 'long_id')}
+        assert_that(
+            actual,
+            not_(ignoring_field_paths(ignored_fields, equals_proto(expected))))
+        assert_that(
+            actual,
+            ignoring_repeated_field_ordering(
+                ignoring_field_paths(ignored_fields, equals_proto(expected))))
+        assert_that(
+            actual,
+            ignoring_field_paths(
+                ignored_fields,
+                ignoring_repeated_field_ordering(equals_proto(expected))))
+
 
 if __name__ == '__main__':
     unittest.main()

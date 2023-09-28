@@ -152,15 +152,31 @@ class MessageDifferencer():
     def _compare_repeated_field(
             self, cmp_args: ProtoFieldComparisonArgs[Iterable]
     ) -> ProtoComparisonResult:
-        expected_list = cmp_args.expected
-        actual_list = cmp_args.actual
+        # Copy first to avoid modifying the original inputs.
+        expected_list = list(cmp_args.expected)
+        actual_list = list(cmp_args.actual)
         if self._opts.repeated_field_comp == RepeatedFieldComparison.AS_SET:
+            # Identify as many matches as possible to minimize the number of
+            # reported diffs.
+            for expected in list(expected_list):
+                for actual in list(actual_list):
+                    item_result = self._compare_value(
+                        ProtoFieldComparisonArgs(expected=expected,
+                                                 actual=actual,
+                                                 field_desc=cmp_args.field_desc,
+                                                 field_path=cmp_args.field_path))
+                    if item_result.is_equal:
+                        actual_list.remove(actual)
+                        expected_list.remove(expected)
+                        break
+            # If diffs remain, best-effort sort the lists to minimize the number
+            # of diffs between each element.
+            # (This is only best-effort because it fails to overlook ignored
+            # fields.)
             as_set_key = lambda x: str(x)
-            # Copy before sorting to avoid modifying the original inputs.
-            expected_list = [x for x in expected_list]
             expected_list.sort(key=as_set_key)
-            actual_list = [x for x in actual_list]
             actual_list.sort(key=as_set_key)
+
         return _combine_results([
             self._compare_value(
                 ProtoFieldComparisonArgs(expected=expected,

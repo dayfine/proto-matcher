@@ -291,7 +291,8 @@ class ProtoCompareTest(unittest.TestCase):
             repeated_field_comp=compare.RepeatedFieldComparison.AS_SET)
         compare.proto_compare(actual, expected, opts=opts)
 
-        self.assertEqual(expected, text_format.Parse(_TEST_PROTO, test_pb2.Foo()))
+        self.assertEqual(
+            expected, text_format.Parse(_TEST_PROTO, test_pb2.Foo()))
         self.assertEqual(actual, text_format.Parse(_TEST_PROTO, test_pb2.Foo()))
 
     def test_ignore_nested_field_with_ignore_repeated_field_order(self):
@@ -329,11 +330,11 @@ class ProtoCompareTest(unittest.TestCase):
         self.assertProtoCompareToBe(
             compare.proto_compare(actual, expected, opts=opts), False)
 
-        # opts = compare.ProtoComparisonOptions(
-        #     repeated_field_comp=compare.RepeatedFieldComparison.AS_SET,
-        #     ignore_field_paths={('bars', 'short_id'), ('bars', 'long_id')})
-        # self.assertProtoCompareToBe(
-        #     compare.proto_compare(actual, expected, opts=opts), True)
+        opts = compare.ProtoComparisonOptions(
+            repeated_field_comp=compare.RepeatedFieldComparison.AS_SET,
+            ignore_field_paths={('bars', 'short_id'), ('bars', 'long_id')})
+        self.assertProtoCompareToBe(
+            compare.proto_compare(actual, expected, opts=opts), True)
 
 
 if __name__ == '__main__':
